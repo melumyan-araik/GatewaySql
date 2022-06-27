@@ -4,10 +4,8 @@ using Oracle.ManagedDataAccess.Client;
 using System;
 using System.Collections.Generic;
 using System.Data;
-using System.Data.Linq;
 using System.Data.SqlClient;
 using System.Diagnostics;
-using System.Linq;
 
 namespace ConsoleAppGateway
 {
@@ -41,7 +39,7 @@ namespace ConsoleAppGateway
             catch (Exception ex)
             {
                 Stop();
-                _logger .AddLog($"Ошибка при старте: {ex.Message}", EventLogEntryType.Error);
+                _logger.AddLog($"Ошибка при старте: {ex.Message}", EventLogEntryType.Error);
                 throw new Exception($"Ошибка при старте: {ex.Message}");
             }
 
@@ -60,7 +58,7 @@ namespace ConsoleAppGateway
             }
             catch (Exception ex)
             {
-                _logger .AddLog($"Ошибка при закрытии соеденения: {ex.Message}", EventLogEntryType.Error);
+                _logger.AddLog($"Ошибка при закрытии соеденения: {ex.Message}", EventLogEntryType.Error);
                 throw new Exception($"Ошибка при закрытии соеденения: {ex.Message}");
             }
         }
@@ -72,44 +70,52 @@ namespace ConsoleAppGateway
             listColNameFrom = listColNameFrom.TrimEnd(',');
 
             string listColNameTo = "";
-            table.ListColName.ForEach(x => listColNameTo += $"{x.NameTo},");
+            string listParamValTo = "";
+            table.ListColName.ForEach(x =>
+            {
+                listColNameTo += $"{x.NameTo},";
+                listParamValTo += $" :{x.NameTo},";
+            });
             listColNameTo = listColNameTo.TrimEnd(',');
+            listParamValTo = listParamValTo.TrimEnd(',');
+
+            string strCommand = $"insert into {table.To} ({listColNameTo}) values ({listParamValTo})";
 
             var sqlMs = $"select {listColNameFrom} from {table.From};";
             var cmdMs = new SqlCommand(sqlMs, _sqlConnection);
+            SqlDataReader reader;
             try
             {
-                var reader = cmdMs.ExecuteReader();
-
-                List<OracleCommand> listSqlOra = new List<OracleCommand>();
-
-                while (reader.Read())
-                {
-                    string values = "";
-                    for (var i = 0; i < reader.FieldCount; i++)
-                    {
-                        values += $"'{reader.GetValue(i)}',";
-                    }
-                    values = values.TrimEnd(',');
-                    listSqlOra.Add(new OracleCommand($"insert into {table.To} ({listColNameTo}) values ({values})", _oracleConnection));
-
-                    if (listSqlOra.Count == _countCommit)
-                    {
-                        InsertOracle(listSqlOra);
-                    }
-                }
-                if (listSqlOra.Count < _countCommit)
-                {
-                    InsertOracle(listSqlOra);
-                }
-
+                reader = cmdMs.ExecuteReader();
             }
             catch (Exception ex)
             {
                 _logger.AddLog($"Ошибка при получении данных: {ex.Message}", EventLogEntryType.Error);
                 throw new Exception($"Ошибка при получении данных: {ex.Message}");
+                
             }
+            
+            List<OracleCommand> listSqlOra = new List<OracleCommand>();
+            while (reader.Read())
+            {
+                OracleCommand cmd = new OracleCommand(strCommand, _oracleConnection);
+                var colName = listColNameTo.Split(',');
+                for (var i = 0; i < reader.FieldCount; i++)
+                {
+                    cmd.Parameters.Add(colName[i], GetOracleDbType(reader.GetFieldType(i)), reader.GetValue(i), ParameterDirection.Input);
+                }
 
+                listSqlOra.Add(cmd);
+
+                if (listSqlOra.Count == _countCommit)
+                {
+                    InsertOracle(listSqlOra);
+                }
+            }
+            if (listSqlOra.Count < _countCommit)
+            {
+                InsertOracle(listSqlOra);
+            }
         }
 
         private void TakeThisFromTheOracleAndPutItDownMssql(Table table)
@@ -117,14 +123,29 @@ namespace ConsoleAppGateway
 
         }
 
+        private static OracleDbType GetOracleDbType(object o)
+       {
+            if (o is string) return OracleDbType.Varchar2;
+            if (o is DateTime) return OracleDbType.Date;
+            if (o is Int64) return OracleDbType.Int64;
+            if (o is Int32) return OracleDbType.Int32;
+            if (o is Int16) return OracleDbType.Int16;
+            if (o is sbyte) return OracleDbType.Byte;
+            // if (o is byte) return OracleDbType.Int16; -- <== unverified
+            if (o is decimal) return OracleDbType.Decimal;
+            if (o is float) return OracleDbType.Single;
+            if (o is double) return OracleDbType.Double;
+            if (o is byte[]) return OracleDbType.Blob;
 
+            return OracleDbType.Varchar2;
+        }
         private void InsertOracle(List<OracleCommand> listSqlOra)
         {
             OracleTransaction Tran = _oracleConnection.BeginTransaction(IsolationLevel.ReadCommitted);
             try
             {
                 foreach (var cmdOra in listSqlOra)
-                { 
+                {
                     cmdOra.ExecuteNonQuery();
                 }
                 Tran.Commit();
@@ -132,7 +153,7 @@ namespace ConsoleAppGateway
             catch (Exception ex)
             {
                 Tran.Rollback();
-                _logger .AddLog($"Ошибка при вставки данных: {ex.Message}", EventLogEntryType.Error);
+                _logger.AddLog($"Ошибка при вставки данных: {ex.Message}", EventLogEntryType.Error);
                 throw new Exception($"Ошибка при вставки данных: {ex.Message}");
             }
         }
@@ -143,6 +164,6 @@ namespace ConsoleAppGateway
         private string _dbTo;
         private List<Table> _tablesl;
         private int _countCommit;
-        private static readonly ILogger _logger  = new LoggerEvent("Gatway");
+        private static readonly ILogger _logger = new LoggerEvent("Gatway");
     }
 }
