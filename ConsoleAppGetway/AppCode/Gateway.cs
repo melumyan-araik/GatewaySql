@@ -102,7 +102,7 @@ namespace ConsoleAppGateway
                 var colName = listColNameTo.Split(',');
                 for (var i = 0; i < reader.FieldCount; i++)
                 {
-                    cmd.Parameters.Add(colName[i], GetOracleDbType(reader.GetFieldType(i)), reader.GetValue(i), ParameterDirection.Input);
+                    cmd.Parameters.Add(colName[i], GetOracleDbType(reader.GetValue(i)), reader.GetValue(i), ParameterDirection.Input);
                 }
 
                 listSqlOra.Add(cmd);
