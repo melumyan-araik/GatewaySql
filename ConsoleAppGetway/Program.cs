@@ -1,4 +1,6 @@
-﻿namespace ConsoleAppGateway
+﻿using System;
+
+namespace ConsoleAppGateway
 {
     internal class Program
     {
@@ -9,8 +11,18 @@
                 AppConfig.Property.ConnectionStringOracle,
                 AppConfig.Property.Tables
             );
-
-            gateway.Start();
+            try
+            {
+                gateway.Start();
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine(ex.Message);
+            }
+            finally
+            {
+                gateway.Stop();
+            }
         }
     }
 }
