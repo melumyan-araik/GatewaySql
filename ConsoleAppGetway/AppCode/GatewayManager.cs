@@ -9,13 +9,13 @@ using System.Diagnostics;
 
 namespace ConsoleAppGateway
 {
-    internal class Gateway : IGateway
+    internal class GatewayManager : IGatewayManager
     {
         public string DbFrom { get => _dbFrom; set => _dbFrom = value; }
         public string DbTo { get => _dbTo; set => _dbTo = value; }
         public List<Table> Tablesl { get => _tablesl; set => _tablesl = value; }
         public int CountCommit { get => _countCommit; set => _countCommit = value; }
-        public Gateway(string dbfrom, string dbto, List<Table> tables, int countCommit = 5000)
+        public GatewayManager(string dbfrom, string dbto, List<Table> tables, int countCommit = 5000)
         {
             DbFrom = dbfrom;
             DbTo = dbto;
@@ -23,7 +23,7 @@ namespace ConsoleAppGateway
             CountCommit = countCommit;
         }
 
-        public Gateway()
+        public GatewayManager()
         {
         }
 
@@ -65,6 +65,9 @@ namespace ConsoleAppGateway
 
         private void TakeThisFromTheMssqlAndPutItDownOracle(Table table)
         {
+            if (table.IsClear)
+                TruncOracle(table.From);
+
             string listColNameFrom = "";
             table.ListColName.ForEach(x => listColNameFrom += $"{x.NameFrom},");
             listColNameFrom = listColNameFrom.TrimEnd(',');
@@ -121,6 +124,46 @@ namespace ConsoleAppGateway
         private void TakeThisFromTheOracleAndPutItDownMssql(Table table)
         {
 
+        }
+
+        private void TruncOracle(string tableName)
+        {
+            var schema = _dbTo.Split('l')[1];
+            var FKlist = new DataTable();
+            //запрос списка внешних ключей
+            using (var oda = new OracleDataAdapter($@"select constraint_name, table_name
+                                                    from user_constraints 
+                                                    where r_constraint_name in
+                                                    (
+                                                    select constraint_name
+                                                    from user_constraints
+                                                    where constraint_type in ('P','U')
+                                                    and table_name = upper('{tableName}') and owner = upper('{schema}'))", _oracleConnection))
+            {
+                oda.Fill(FKlist);
+            }
+            //Отключаем все ключи
+            foreach (DataRow row in FKlist.Rows)
+            {
+                using (var cmddisabled = new OracleCommand($"alter table {row["table_name"]} disable CONSTRAINT  {row["constraint_name"]}", _oracleConnection))
+                {
+                   cmddisabled.ExecuteNonQuery();
+                }
+            }
+
+            using (var cmd = new OracleCommand($"truncate table {tableName}", _oracleConnection))
+            {
+                cmd.ExecuteNonQuery();
+            }
+
+            //Включаем все ключи
+            foreach (DataRow row in FKlist.Rows)
+            {
+                using (var cmddisabled = new OracleCommand($"alter table {row["table_name"]} enable CONSTRAINT  {row["constraint_name"]}", _oracleConnection))
+                {
+                    cmddisabled.ExecuteNonQuery();
+                }
+            }
         }
 
         private static OracleDbType GetOracleDbType(object o)

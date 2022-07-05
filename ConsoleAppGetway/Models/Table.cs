@@ -6,7 +6,7 @@ namespace ConsoleAppGateway.Models
     {
         public string From { get; set; }
         public string To { get; set; }
-
+        public bool IsClear { get; set; }
         public List<ColName> ListColName { get; set; }
     }
 

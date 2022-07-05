@@ -1,6 +1,6 @@
 ﻿namespace ConsoleAppGateway
 {
-    internal interface IGateway
+    internal interface IGatewayManager
     {
         void Start();
         void Stop();
