@@ -30,7 +30,7 @@ namespace ConsoleAppGateway
 
         public void Start()
         {
-            Console.WriteLine($"Начало работы: {DateTime.Now}");
+            _startTime = DateTime.Now;
             _sqlConnection = new SqlConnection(_dbFrom);
             _oracleConnection = new OracleConnection(_dbTo);
             try
@@ -45,18 +45,10 @@ namespace ConsoleAppGateway
                 throw new Exception($"Ошибка при старте: {ex.Message}");
             }
 
-            try
-            {
-                CheckSettings();
-            }
-            catch (Exception ex)
-            {
-                throw new Exception($"Ошибка в файле конфигураций: {ex.Message}");
-            }
-
-
             foreach (var table in _tablesl)
             {
+                Console.WriteLine($"\nОбновление: {table.To}");
+                CheckSettings(table);
                 TakeThisFromTheMssqlAndPutItDownOracle(table);
             }
         }
@@ -75,37 +67,35 @@ namespace ConsoleAppGateway
             }
             finally
             {
-                Console.WriteLine($"Окончание работы: {DateTime.Now}");
+                Console.WriteLine($"\nВремя работы программы: { DateTime.Now - _startTime}");
             }
         }
 
-        public void CheckSettings()
+        public void CheckSettings(Table table)
         {
-            foreach (var table in _tablesl)
+            try
             {
-                try
-                {
-                    var sqlMs = $"select  count(*) from {table.From};";
-                    var cmdMs = new SqlCommand(sqlMs, _sqlConnection);
-                    var count = (int)cmdMs.ExecuteScalar();
-                    Console.WriteLine($"Количество записей в таблице {table.From}: {count}");
-                }
-                catch (Exception ex)
-                {
-                    throw new Exception($"Ошибка при проверки таблицы MSSql {table.From}: {ex.Message}", ex);
-                }
+                var sqlMs = $"select  count(*) from {table.From};";
+                var cmdMs = new SqlCommand(sqlMs, _sqlConnection);
+                cmdMs.CommandTimeout = COMMAND_TIMEOUT;
+                _countFrom = Convert.ToInt32(cmdMs.ExecuteScalar());
+                Console.WriteLine($"Количество записей в таблице {table.From}: {_countFrom}  <== From");
+            }
+            catch (Exception ex)
+            {
+                throw new Exception($"Ошибка при проверки таблицы MSSql {table.From}: {ex.Message}", ex);
+            }
 
-                try
-                {
-                    string strCommand = $"select count(*) from {table.To}";
-                    OracleCommand cmd = new OracleCommand(strCommand, _oracleConnection);
-                    var count = (int)cmd.ExecuteScalar();
-                    Console.WriteLine($"Количество записей в таблице {table.To}: {count}");
-                }
-                catch (Exception ex)
-                {
-                    throw new Exception($"Ошибка при проверки таблицы ORA {table.To}: {ex.Message}", ex);
-                }
+            try
+            {
+                string strCommand = $"select count(*) from {table.To}";
+                OracleCommand cmd = new OracleCommand(strCommand, _oracleConnection);
+                _countTo = Convert.ToInt32(cmd.ExecuteScalar());
+                Console.WriteLine($"Количество записей в таблице {table.To}: {_countTo}  <== To");
+            }
+            catch (Exception ex)
+            {
+                throw new Exception($"Ошибка при проверки таблицы ORA {table.To}: {ex.Message}", ex);
             }
         }
 
@@ -114,8 +104,9 @@ namespace ConsoleAppGateway
             if (table.IsClear)
             {
                 TruncOracle(table.To);
-                Console.WriteLine($"Удаление элементов таблицы: {table.To}");
+                Console.WriteLine($"Очищение таблицы: {table.To}");
             }
+            Console.WriteLine($"Уровень комитов: {_countCommit}");
 
             string listColNameFrom = "";
             table.ListColName.ForEach(x => listColNameFrom += $"{x.NameFrom},");
@@ -135,6 +126,7 @@ namespace ConsoleAppGateway
 
             var sqlMs = $"select {listColNameFrom} from {table.From};";
             var cmdMs = new SqlCommand(sqlMs, _sqlConnection);
+            cmdMs.CommandTimeout = COMMAND_TIMEOUT;
             SqlDataReader reader;
             try
             {
@@ -147,6 +139,10 @@ namespace ConsoleAppGateway
             }
 
             List<OracleCommand> listSqlOra = new List<OracleCommand>();
+            var dInsert = DateTime.Now;
+            var iteratorCountCommit = 0;
+            int totalCountCommit = _countFrom / _countCommit + 1;
+            Console.Write($"Вставка в {table.To}: {iteratorCountCommit}/{totalCountCommit}");
             while (reader.Read())
             {
                 OracleCommand cmd = new OracleCommand(strCommand, _oracleConnection);
@@ -163,8 +159,9 @@ namespace ConsoleAppGateway
                     var d = DateTime.Now;
                     InsertOracle(listSqlOra);
                     var dt = DateTime.Now - d;
-
-                    Console.WriteLine($"Вставка в {table.To}: {listSqlOra.Count} элементов :: Время вставки: {dt}");
+                    iteratorCountCommit++;
+                    Console.SetCursorPosition(0, Console.CursorTop);
+                    Console.Write($"Вставка в {table.To}: {iteratorCountCommit}/{totalCountCommit} :: Время вставки: {dt}");
                     listSqlOra = new List<OracleCommand>();
                 }
             }
@@ -173,11 +170,13 @@ namespace ConsoleAppGateway
                 var d = DateTime.Now;
                 InsertOracle(listSqlOra);
                 var dt = DateTime.Now - d;
-                Console.WriteLine($"Вставка в {table.To}: {listSqlOra.Count} элементов :: Время вставки: {dt}");
+                iteratorCountCommit++;
+                Console.SetCursorPosition(0, Console.CursorTop);
+                Console.WriteLine($"Вставка в {table.To}: {iteratorCountCommit}/{totalCountCommit} :: Время вставки: {dt}");
                 listSqlOra = new List<OracleCommand>();
             }
-
-
+            reader.Close();
+            Console.WriteLine($"Время обновления {table.To}: {DateTime.Now - dInsert}");
         }
 
         private void TakeThisFromTheOracleAndPutItDownMssql(Table table)
@@ -273,6 +272,10 @@ namespace ConsoleAppGateway
         private string _dbTo;
         private List<Table> _tablesl;
         private int _countCommit = 5000;
+        private int _countTo;
+        private int _countFrom;
+        private DateTime _startTime;
         private static readonly ILogger _logger = new LoggerEvent("Gatway");
+        private const int COMMAND_TIMEOUT = 140;
     }
 }
