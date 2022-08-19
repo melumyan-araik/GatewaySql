@@ -13,6 +13,7 @@ namespace ConsoleAppGateway
     {
         public string DbFrom { get => _dbFrom; set => _dbFrom = value; }
         public string DbTo { get => _dbTo; set => _dbTo = value; }
+
         public List<Table> Tablesl { get => _tablesl; set => _tablesl = value; }
         public int CountCommit { get => _countCommit; set => _countCommit = value; }
         public GatewayManager(string dbfrom, string dbto, List<Table> tables, int countCommit = 5000)
@@ -29,6 +30,7 @@ namespace ConsoleAppGateway
 
         public void Start()
         {
+            Console.WriteLine($"Начало работы: {DateTime.Now}");
             _sqlConnection = new SqlConnection(_dbFrom);
             _oracleConnection = new OracleConnection(_dbTo);
             try
@@ -42,6 +44,16 @@ namespace ConsoleAppGateway
                 _logger.AddLog($"Ошибка при старте: {ex.Message}", EventLogEntryType.Error);
                 throw new Exception($"Ошибка при старте: {ex.Message}");
             }
+
+            try
+            {
+                CheckSettings();
+            }
+            catch (Exception ex)
+            {
+                throw new Exception($"Ошибка в файле конфигураций: {ex.Message}");
+            }
+
 
             foreach (var table in _tablesl)
             {
@@ -61,12 +73,49 @@ namespace ConsoleAppGateway
                 _logger.AddLog($"Ошибка при закрытии соеденения: {ex.Message}", EventLogEntryType.Error);
                 throw new Exception($"Ошибка при закрытии соеденения: {ex.Message}");
             }
+            finally
+            {
+                Console.WriteLine($"Окончание работы: {DateTime.Now}");
+            }
+        }
+
+        public void CheckSettings()
+        {
+            foreach (var table in _tablesl)
+            {
+                try
+                {
+                    var sqlMs = $"select  count(*) from {table.From};";
+                    var cmdMs = new SqlCommand(sqlMs, _sqlConnection);
+                    var count = (int)cmdMs.ExecuteScalar();
+                    Console.WriteLine($"Количество записей в таблице {table.From}: {count}");
+                }
+                catch (Exception ex)
+                {
+                    throw new Exception($"Ошибка при проверки таблицы MSSql {table.From}: {ex.Message}", ex);
+                }
+
+                try
+                {
+                    string strCommand = $"select count(*) from {table.To}";
+                    OracleCommand cmd = new OracleCommand(strCommand, _oracleConnection);
+                    var count = (int)cmd.ExecuteScalar();
+                    Console.WriteLine($"Количество записей в таблице {table.To}: {count}");
+                }
+                catch (Exception ex)
+                {
+                    throw new Exception($"Ошибка при проверки таблицы ORA {table.To}: {ex.Message}", ex);
+                }
+            }
         }
 
         private void TakeThisFromTheMssqlAndPutItDownOracle(Table table)
         {
             if (table.IsClear)
-                TruncOracle(table.From);
+            {
+                TruncOracle(table.To);
+                Console.WriteLine($"Удаление элементов таблицы: {table.To}");
+            }
 
             string listColNameFrom = "";
             table.ListColName.ForEach(x => listColNameFrom += $"{x.NameFrom},");
@@ -95,9 +144,8 @@ namespace ConsoleAppGateway
             {
                 _logger.AddLog($"Ошибка при получении данных: {ex.Message}", EventLogEntryType.Error);
                 throw new Exception($"Ошибка при получении данных: {ex.Message}");
-                
             }
-            
+
             List<OracleCommand> listSqlOra = new List<OracleCommand>();
             while (reader.Read())
             {
@@ -112,13 +160,24 @@ namespace ConsoleAppGateway
 
                 if (listSqlOra.Count == _countCommit)
                 {
+                    var d = DateTime.Now;
                     InsertOracle(listSqlOra);
+                    var dt = DateTime.Now - d;
+
+                    Console.WriteLine($"Вставка в {table.To}: {listSqlOra.Count} элементов :: Время вставки: {dt}");
+                    listSqlOra = new List<OracleCommand>();
                 }
             }
             if (listSqlOra.Count < _countCommit)
             {
+                var d = DateTime.Now;
                 InsertOracle(listSqlOra);
+                var dt = DateTime.Now - d;
+                Console.WriteLine($"Вставка в {table.To}: {listSqlOra.Count} элементов :: Время вставки: {dt}");
+                listSqlOra = new List<OracleCommand>();
             }
+
+
         }
 
         private void TakeThisFromTheOracleAndPutItDownMssql(Table table)
@@ -128,10 +187,12 @@ namespace ConsoleAppGateway
 
         private void TruncOracle(string tableName)
         {
-            var schema = _dbTo.Split('l')[1];
-            var FKlist = new DataTable();
-            //запрос списка внешних ключей
-            using (var oda = new OracleDataAdapter($@"select constraint_name, table_name
+            try
+            {
+                var schema = _dbTo.Split('l')[1];
+                var FKlist = new DataTable();
+                //запрос списка внешних ключей
+                using (var oda = new OracleDataAdapter($@"select constraint_name, table_name
                                                     from user_constraints 
                                                     where r_constraint_name in
                                                     (
@@ -139,35 +200,40 @@ namespace ConsoleAppGateway
                                                     from user_constraints
                                                     where constraint_type in ('P','U')
                                                     and table_name = upper('{tableName}') and owner = upper('{schema}'))", _oracleConnection))
-            {
-                oda.Fill(FKlist);
-            }
-            //Отключаем все ключи
-            foreach (DataRow row in FKlist.Rows)
-            {
-                using (var cmddisabled = new OracleCommand($"alter table {row["table_name"]} disable CONSTRAINT  {row["constraint_name"]}", _oracleConnection))
                 {
-                   cmddisabled.ExecuteNonQuery();
+                    oda.Fill(FKlist);
+                }
+                //Отключаем все ключи
+                foreach (DataRow row in FKlist.Rows)
+                {
+                    using (var cmddisabled = new OracleCommand($"alter table {row["table_name"]} disable CONSTRAINT  {row["constraint_name"]}", _oracleConnection))
+                    {
+                        cmddisabled.ExecuteNonQuery();
+                    }
+                }
+
+                using (var cmd = new OracleCommand($"truncate table {tableName}", _oracleConnection))
+                {
+                    cmd.ExecuteNonQuery();
+                }
+
+                //Включаем все ключи
+                foreach (DataRow row in FKlist.Rows)
+                {
+                    using (var cmddisabled = new OracleCommand($"alter table {row["table_name"]} enable CONSTRAINT  {row["constraint_name"]}", _oracleConnection))
+                    {
+                        cmddisabled.ExecuteNonQuery();
+                    }
                 }
             }
-
-            using (var cmd = new OracleCommand($"truncate table {tableName}", _oracleConnection))
+            catch (Exception ex)
             {
-                cmd.ExecuteNonQuery();
-            }
-
-            //Включаем все ключи
-            foreach (DataRow row in FKlist.Rows)
-            {
-                using (var cmddisabled = new OracleCommand($"alter table {row["table_name"]} enable CONSTRAINT  {row["constraint_name"]}", _oracleConnection))
-                {
-                    cmddisabled.ExecuteNonQuery();
-                }
+                throw new Exception($"Ошибка при удалении из таблицы {tableName}: {ex.Message}");
             }
         }
 
         private static OracleDbType GetOracleDbType(object o)
-       {
+        {
             if (o is string) return OracleDbType.Varchar2;
             if (o is DateTime) return OracleDbType.Date;
             if (o is Int64) return OracleDbType.Int64;
@@ -206,7 +272,7 @@ namespace ConsoleAppGateway
         private string _dbFrom;
         private string _dbTo;
         private List<Table> _tablesl;
-        private int _countCommit;
+        private int _countCommit = 5000;
         private static readonly ILogger _logger = new LoggerEvent("Gatway");
     }
 }

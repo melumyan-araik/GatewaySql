@@ -6,14 +6,14 @@ namespace ConsoleAppGateway
     {
         static void Main(string[] args)
         {
-            var gateway = new Gateway(
+            var gateway = new GatewayManager(
                 AppConfig.Property.ConnectionStringMsSql,
                 AppConfig.Property.ConnectionStringOracle,
                 AppConfig.Property.Tables
             );
             try
             {
-                gateway.Start();
+               gateway.Start();
             }
             catch (Exception ex)
             {
