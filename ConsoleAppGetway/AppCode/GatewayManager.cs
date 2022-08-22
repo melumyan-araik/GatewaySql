@@ -83,6 +83,7 @@ namespace ConsoleAppGateway
             }
             catch (Exception ex)
             {
+                _logger.AddLog($"Ошибка при проверки таблицы MSSql {table.From}: {ex.Message}", EventLogEntryType.Error);
                 throw new Exception($"Ошибка при проверки таблицы MSSql {table.From}: {ex.Message}", ex);
             }
 
@@ -95,6 +96,7 @@ namespace ConsoleAppGateway
             }
             catch (Exception ex)
             {
+                _logger.AddLog($"Ошибка при проверки таблицы ORA {table.To}: {ex.Message}", EventLogEntryType.Error);
                 throw new Exception($"Ошибка при проверки таблицы ORA {table.To}: {ex.Message}", ex);
             }
         }
