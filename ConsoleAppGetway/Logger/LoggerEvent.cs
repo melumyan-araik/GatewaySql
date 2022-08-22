@@ -1,5 +1,6 @@
 ﻿using System;
 using System.Diagnostics;
+using System.IO;
 
 namespace ConsoleAppGateway.Logger
 {
@@ -18,9 +19,13 @@ namespace ConsoleAppGateway.Logger
                 var el = GetLog();
                 el.WriteEntry(mes, type);
             }
-            catch
+            catch (Exception ex)
             {
-                // ignored
+                var dirLog = Path.Combine(Directory.GetCurrentDirectory(), "Log");
+                if (!Directory.Exists(dirLog))
+                    Directory.CreateDirectory(dirLog);
+
+                File.WriteAllText(Path.Combine(dirLog, $"{nameLog}-{DateTime.Now.ToString("ddMMyyyyHHmmss")}-log.txt"), $"{Enum.GetName(typeof(EventLogEntryType), type)}:: {mes}\n{ex.Message}\n=======================");
             }
         }
 
